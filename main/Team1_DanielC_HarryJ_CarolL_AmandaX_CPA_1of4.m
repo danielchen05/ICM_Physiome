@@ -265,16 +265,16 @@ fprintf('\n=== Starting Problem 5: Parlikar (#14) for three patients ===\n');
 
 % ---------------------- USER-EDIT THIS BLOCK ---------------------------
 ABP_FILES = { ...
-    '/Users/harry/Desktop/ICM/Project 1/PhysioToolkitCardiacOutput_MatlabCode/跑script需要的文件/s00020-2567-03-30-17-47_ABP.txt', ...
-    '/Users/harry/Desktop/ICM/Project 1/PhysioToolkitCardiacOutput_MatlabCode/跑script需要的文件/s10013-2564-11-01-23-37_ABP.txt', ...
-    '/Users/harry/Desktop/ICM/Project 1/PhysioToolkitCardiacOutput_MatlabCode/跑script需要的文件/s10205-2631-06-14-11-38_ABP.txt', ...
-    '/Users/harry/Desktop/ICM/Project 1/PhysioToolkitCardiacOutput_MatlabCode/跑script需要的文件/s10241-3150-11-15-13-27_ABP.txt' ...
+    '/Users/harry/Desktop/ICM/Project 1/PhysioToolkitCardiacOutput_MatlabCode/main/s00020-2567-03-30-17-47_ABP.txt', ...
+    '/Users/harry/Desktop/ICM/Project 1/PhysioToolkitCardiacOutput_MatlabCode/main/s10013-2564-11-01-23-37_ABP.txt', ...
+    '/Users/harry/Desktop/ICM/Project 1/PhysioToolkitCardiacOutput_MatlabCode/main/s10205-2631-06-14-11-38_ABP.txt', ...
+    '/Users/harry/Desktop/ICM/Project 1/PhysioToolkitCardiacOutput_MatlabCode/main/s10241-3150-11-15-13-27_ABP.txt' ...
 };
 NUM_FILES = { ...
-    '/Users/harry/Desktop/ICM/Project 1/PhysioToolkitCardiacOutput_MatlabCode/跑script需要的文件/s00020-2567-03-30-17-47n.txt', ...
-    '/Users/harry/Desktop/ICM/Project 1/PhysioToolkitCardiacOutput_MatlabCode/跑script需要的文件/s10013-2564-11-01-23-37n.txt', ...
-    '/Users/harry/Desktop/ICM/Project 1/PhysioToolkitCardiacOutput_MatlabCode/跑script需要的文件/s10205-2631-06-14-11-38n.txt', ...
-    '/Users/harry/Desktop/ICM/Project 1/PhysioToolkitCardiacOutput_MatlabCode/跑script需要的文件/s10241-3150-11-15-13-27n.txt' ...
+    '/Users/harry/Desktop/ICM/Project 1/PhysioToolkitCardiacOutput_MatlabCode/main/s00020-2567-03-30-17-47n.txt', ...
+    '/Users/harry/Desktop/ICM/Project 1/PhysioToolkitCardiacOutput_MatlabCode/main/s10013-2564-11-01-23-37n.txt', ...
+    '/Users/harry/Desktop/ICM/Project 1/PhysioToolkitCardiacOutput_MatlabCode/main/s10205-2631-06-14-11-38n.txt', ...
+    '/Users/harry/Desktop/ICM/Project 1/PhysioToolkitCardiacOutput_MatlabCode/main/s10241-3150-11-15-13-27n.txt' ...
 };
 OUT_ROOT  = '/Users/harry/Desktop/ICM/Project 1/PhysioToolkitCardiacOutput_MatlabCode/Q5';
 % ----------------------------------------------------------------------
@@ -462,3 +462,102 @@ end
 
 compare_algorithms_q5(ABP_FILES, NUM_FILES, OUT_ROOT, [14 5 2 7]);
 fprintf('\n=== Problem 5 Completed for All Three Patients ===\n');
+
+%% -------------------------- PROBLEM 6 ---------------------------------
+%% Estimate and plot TPR (Resistance) over first 12 h, Parlikar style
+%   Output: one Q6 folder under OUT_ROOT with per-patient subfolders
+%   Units: TPR in mmHg/(mL/s)
+%   Patients: #20, 10205, 10241  (indices [1 3 4])
+
+fprintf('\n=== Starting Problem 6: TPR Parlikar-style single-panel plots ===\n');
+
+Fs       = 125;                % Hz
+TMAX_HR  = 12;
+TMAX_SEC = TMAX_HR * 3600;
+
+% Separate Q6 root under the general output folder
+OUT_Q6_ROOT = fullfile(OUT_ROOT, 'Q6');
+if ~exist(OUT_Q6_ROOT,'dir'); mkdir(OUT_Q6_ROOT); end
+
+% Patients to process
+PATS_FOR_Q6 = [1 3 4];
+
+for idx = 1:numel(PATS_FOR_Q6)
+    p = PATS_FOR_Q6(idx);
+
+    PATH_ABP = ABP_FILES{p};
+    PATH_NUM = NUM_FILES{p};
+    [~, abp_base, ~] = fileparts(PATH_ABP);
+    pat_label = sprintf('patient_%02d_%s', p, abp_base);
+
+    % Problem 5 data and new Q6 folder
+    OUT_DIR_Q5 = fullfile(OUT_ROOT, pat_label);
+    OUT_DIR_Q6 = fullfile(OUT_Q6_ROOT, pat_label);
+    if ~exist(OUT_DIR_Q6,'dir'); mkdir(OUT_DIR_Q6); end
+
+    fprintf('\n--- Generating TPR plot for %s ---\n', pat_label);
+
+    % Load saved 12-hour ABP features
+    mat_out_q5 = fullfile(OUT_DIR_Q5, 'first12h_Q5.mat');
+    if ~isfile(mat_out_q5)
+        error('Missing %s. Run Problem 5 first.', mat_out_q5);
+    end
+
+    % Run Parlikar estimator (#14)
+    [co_uncal, to_min, ~, fea] = estimateCO_v2(mat_out_q5, 14, 1);
+    to_sec = to_min * 60;
+
+    % Extract needed features
+    MAP    = fea(:,6);               % mean ABP [mmHg]
+    Period = fea(:,7);
+    HR     = 60 * Fs ./ Period; %#ok<NASGU>
+
+    % ---- Calibration using first thermodilution point ----
+    tbl = readtable(PATH_NUM,'FileType','text','HeaderLines',2);
+    time_num_all = tbl{:,1};
+    CO_TD_all    = tbl{:,end};
+    nz_idx_all      = find(CO_TD_all ~= 0 & ~isnan(CO_TD_all));
+    td_time_sec_all = time_num_all(nz_idx_all);
+    td_CO_Lmin_all  = CO_TD_all(nz_idx_all);
+
+    if isempty(td_time_sec_all)
+        k_cal = 1;
+    else
+        TD0 = td_CO_Lmin_all(1);
+        t0_sec = td_time_sec_all(1);
+        [~, i_near] = min(abs(to_min - (t0_sec/60)));
+        if isempty(i_near) || i_near<1 || i_near>numel(co_uncal)
+            k_cal = 1;
+        else
+            k_cal = TD0 / co_uncal(i_near);
+        end
+    end
+    co_cal = k_cal * co_uncal;
+
+    % Align vectors
+    L = min([length(to_sec), length(co_cal), length(MAP)]);
+    to_sec = to_sec(1:L);
+    co_cal = co_cal(1:L);
+    MAP    = MAP(1:L);
+
+    % ---- Compute TPR ----
+    CO_mlps = co_cal * 1000 / 60;       % [mL/s]
+    TPR = MAP ./ CO_mlps;               % [mmHg/(mL/s)]
+    TPR(~isfinite(TPR)) = NaN;
+
+    % ---- Plot Parlikar-style single-panel Resistance curve ----
+    f = figure('Color','w','Name',sprintf('TPR_%s', pat_label));
+    plot(to_sec, TPR, 'b', 'LineWidth', 1.2); hold on;
+    ylabel('Resistance (mmHg/(mL/s))');
+    xlabel('Time (secs)');
+    title(sprintf('Estimated TPR – %s', pat_label), 'Interpreter','none');
+    grid on; xlim([0 TMAX_SEC]);
+
+    % Save to Q6 subdirectory
+    saveas(f, fullfile(OUT_DIR_Q6, sprintf('%s_TPR_only.png', pat_label)));
+    close(f);
+
+    fprintf('Saved Parlikar-style TPR plot to %s\n', OUT_DIR_Q6);
+end
+
+fprintf('\n=== Problem 6 (TPR-only) Completed for Selected Patients ===\n');
